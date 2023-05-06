@@ -1,15 +1,17 @@
 ## Описание проекта
 
-Данный проект служит для отслеживания заряда батареии на Macbook и выдачи системных уведомлений на экран при наступлении лимитов (20/80 - по умолчанию).
-Проект написан на AppleScript и bash
+Данный проект служит для отслеживания заряда батареии на Macbook и выдачи системных уведомлений на экран при наступлении лимитов (20/80 - по умолчанию), а также уведомлений в указанный Telegram канал.
+Проект написан на AppleScript и bash.
 
 ## Установка скрипта 
 
-1. git clone https://github.com/qzeleza/BatteryScope.git
-2. cd BatteryScope
-3. echo "telegramToken=<Ваш telegram Token>" > ./telegram.conf
-4. echo "telegramChatId=<Ваш telegram ChatId>" >> ./telegram.conf
-5. ./battscope.run on
+```
+git clone https://github.com/qzeleza/BatteryScope.git
+cd BatteryScope
+echo "telegramToken=<Ваш telegram Token>" > ./telegram.conf
+echo "telegramChatId=<Ваш telegram ChatId>" >> ./telegram.conf
+./battscope.run on
+```
 
 Скрипт установит в автозагрузку AppleScript скрипт battscope.scpt при помощи com.samovar.batteryscope.plist. 
 
