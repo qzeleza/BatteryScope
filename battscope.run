@@ -1,0 +1,225 @@
+#!/bin/bash
+
+APP_PATH=/Users/samovar/Develop/BatteryScope
+PLIST_PATH=/Library/LaunchDaemons
+PLIST_NAME=com.samovar.batteryscope
+PLIST=${PLIST_PATH}/${PLIST_NAME}.plist
+SERVICE=system/com.samovar.battscope
+
+minBatteryLevel=21
+maxBatteryLevel=81
+
+# Переменная для хранения статуса демона
+DAEMON_STATUS=""
+
+# Устанавливаем минимальный порог страбатывания сообщений о зарядке
+set_limit() {
+    limit=${1}
+    value=${2}
+
+    if [ -n "${value}" ]; then
+        sed -i "" "s/\(${limit}=\).*/\1${value}/" "${0}" && {
+            echo "Лимит ${limit} установлен в значение ${value}"
+        } || {
+            echo "Ошибка при установке лимита."
+        }
+
+    else
+        if [ "${limit}" = "minBatteryLevel" ]; then 
+            echo "Минимальный порог установлен в ${minBatteryLevel}%"
+        else
+            echo "Максимальный порог установлен в ${maxBatteryLevel}%"
+        fi
+    fi
+
+}
+
+# Устанавливаем период запуска в фоне в секундах
+set_period() {
+    period=${1}
+    if [ -n "${period}" ]; then 
+    	sudo sed -i "" "/StartInterval/,/dict/ s/<integer>.*<\/integer>/<integer>${period}<\/integer>/g" ${PLIST} && \
+		sudo launchctl disable ${SERVICE} && \
+		sudo launchctl enable ${SERVICE} && \
+		echo "Период успешно установлен на ${period} сек." || \
+		echo "При установке периода возникла ошибка!"
+    else 
+	   echo "Период проверки статуса батареи установлен на $(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек."
+    fi
+}
+
+# Устанавливаем минимальный порог сраба
+test_service() {
+    return $(launchctl print gui/$UID | grep -q 'com.samovar.battscope')
+}
+
+# Функция запуска демона
+load_daemon() {
+
+    if [ -f "${PLIST}" ]; then
+    	# Проверяем, не запущен ли демон уже
+    	if test_service ; then
+        	echo "battscope уже запущен."
+        	return 1
+    	else
+        	# Запускаем демона в фоновом режиме
+        	if sudo launchctl enable ${SERVICE} ; then
+                     echo "battscope успешно загружен."
+                     return 0
+        	else
+		     echo "При загрузке battscope произошла ошибка"
+		fi
+	fi
+    else
+	sudo cp ${APP_PATH}/${PLIST_NAME}.plist ${PLIST}
+	if sudo launchctl enable ${SERVICE} ; then
+	    echo "battscope успешно загружен."
+            return 0
+	else
+	    echo "При загрузке battscope произошла ошибка"
+	fi
+    fi
+}
+
+# Функция выгрузки демона
+unload_daemon() {
+    # Проверяем, не запущен ли демон уже
+    if test_service ; then
+	sudo launchctl disable ${SERVICE} && sudo rm -f ${PLIST} && echo "battscope успешно выгружен."
+        return 0
+    else
+        echo "battscope НЕ загружен в автозагрузку."
+        return 1
+    fi
+}
+
+# Функция выгрузки демона
+start_daemon() {
+    # Проверяем, не загружен ли демон уже
+    if test_service; then
+        echo "battscope уже в памяти."
+        return 1
+    else
+	# Запускаем демона в фоновом режиме
+    	if [ -f "${PLIST}" ]; then
+            sudo launchctl start ${PLIST} && {
+                echo "battscope успешно запущен."
+                return 0
+            }
+	 
+	else
+	    load_daemon
+	fi
+    fi
+}
+
+# Функция остановки демона
+stop_daemon() {
+    # Проверяем, не остановлен ли демон уже
+    if test_service; then
+	sudo launchctl stop ${PLIST} && echo "battscope остановлен."
+	return 0
+    else
+        # Запускаем демона в фоновом режиме
+        echo "battscope в памяти отсутствует."
+	return 1
+    fi
+}
+
+# Функция вывода статуса демона
+status_daemon() {
+	
+    if test_service; then
+        DAEMON_STATUS="запущен"
+    else
+        DAEMON_STATUS="остановлен"
+    fi
+ 
+    batt_stat=$(pmset -g batt)
+
+    if echo ${batt_stat} | grep -q 'AC Power'; then 
+        power_=подключена
+        stat="charging"
+    else 
+        power_="отключена"   
+        stat="discharging"
+    fi
+
+    mess="Заряд $(echo "${batt_stat}" | grep "${stat}" | cut -d")" -f2 | cut -d"%" -f1 | sed 's/^.//')%" 
+        
+    if echo "${batt_stat}" | grep -q "no estimate" ; then
+        remain="Хватит: нет данных";
+    else
+	    hh=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f1)
+        mm=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f2)
+    	
+        if echo "${stat}" | grep -q "^charging" ; then 
+            remain="До полного разряда: ${hh} ч. ${mm} мин."
+        else
+            remain="Хватит на ${hh} ч. ${mm} мин."
+        fi
+    fi
+    
+    echo "${mess}."
+    echo "Зарядка ${power_}."
+    echo "${remain}"
+    echo "Пороги мин.: ${minBatteryLevel}%, макс.: ${maxBatteryLevel}%"
+    echo "Сервис контроля зарядки: $DAEMON_STATUS"
+    echo "Период проверки статуса батареи установлен на $(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек."
+    
+}
+
+
+# Обработка входных аргументов
+echo "----------------------------------------------------------------"
+case "$1" in
+    load|start|on)
+        load_daemon
+        ;;
+    unload|stop|off)
+        unload_daemon
+        ;;
+    restart)
+        unload_daemon && load_daemon
+        ;;
+    status|log)
+        status_daemon
+        ;;
+    min)
+        set_limit "minBatteryLevel" "${2}"
+        ;;
+    max)
+        set_limit "maxBatteryLevel" "${2}"
+        ;;
+    update)
+	set_period $2
+	;;
+    *)
+	echo "Скрипт запускает сервис отслеживания состояния зарядки ноутбука."
+    echo "----------------------------------------------------------------"
+	echo "Использование: $0 {load|start|unload|stop|restart|status}" >&2
+	echo "Использование: $0 {update|update '30'}" >&2
+	echo "----------------------------------------------------------------"
+	echo "Описание ключей:"
+	echo "----------------------------------------------------------------"
+	echo "load|start|on   - загружаем сервис в автозагрузку"
+	echo "unload|stop|off - выгружавем сервис из автозагрузки"
+    echo "restart         - перезапускаем сервис"
+    echo "status|log      - отображаем статус сервиса"
+    echo "update          - отображаем период опроса состояния батареи"
+    echo "update '30'     - устанавливаем период опроса батереи в сек."
+    echo "min             - отображаем минимальный порог сигнала, в %"
+    echo "min 20          - устанавливаем минимальный порог сигнала, в %"
+    echo "max             - отображаем максимальный порог сигнала, в %"
+    echo "max 80          - устанавливаем максимальный порог сигнала, в %"
+
+       
+        ;;
+esac
+
+echo "----------------------------------------------------------------"
+
+exit 0
+
+
+

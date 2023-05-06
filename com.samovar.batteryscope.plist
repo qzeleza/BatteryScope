@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" 
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.samovar.batteryscope</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>osascript</string>
+      <string>/Users/samovar/Develop/BatteryScope/battscope.scpt</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>60</integer>
+  </dict>
+</plist>
+
