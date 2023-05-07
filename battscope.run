@@ -7,6 +7,7 @@ PLIST_PATH=/Library/LaunchDaemons
 PLIST_NAME=com.samovar.batteryscope
 PLIST=${PLIST_PATH}/${PLIST_NAME}.plist
 SERVICE=system/com.samovar.battscope
+red="\`\`\` "
 
 minBatteryLevel=21
 maxBatteryLevel=81
@@ -34,21 +35,25 @@ message_send() {
 
 # Устанавливаем минимальный порог страбатывания сообщений о зарядке
 set_limit() {
-    limit=${1}
-    value=${2}
+
+    limit=${1}; value=${2}
 
     if [ -n "${value}" ]; then
         sed -i "" "s/\(${limit}=\).*/\1${value}/" "${0}" && {
-            message_send "Лимит ${limit} установлен в значение ${value}"
+            if echo "${limit}" | grep -q 'min'; then 
+                message_send "*Минимальный* порог установлен в${red}${value}%${red}"
+            else
+                message_send "*Максимальный* порог установлен в${red}${value}%${red}"
+            fi
         } || {
-            message_send "Ошибка при установке лимита."
+            message_send "${red}Ошибка при установке лимита.${red}"
         }
 
     else
         if [ "${limit}" = "minBatteryLevel" ]; then 
-            message_send "Минимальный порог установлен в _${minBatteryLevel}%_"
+            message_send "*Минимальный* порог установлен в ${red}${minBatteryLevel}%${red}"
         else
-            message_send "Максимальный порог установлен в ${maxBatteryLevel}%"
+            message_send "*Максимальный* порог установлен в ${red}${maxBatteryLevel}%${red}"
         fi
     fi
 
@@ -61,10 +66,10 @@ set_period() {
     	sudo sed -i "" "/StartInterval/,/dict/ s/<integer>.*<\/integer>/<integer>${period}<\/integer>/g" ${PLIST} && \
 		sudo launchctl disable ${SERVICE} && \
 		sudo launchctl enable ${SERVICE} && \
-		echo "Период успешно установлен на ${period} сек." || \
-		message_send "При установке периода возникла ошибка!"
+		message_send "Период успешно установлен на *${period} сек.*" || \
+		message_send "${red}При установке периода возникла ошибка!${red}"
     else 
-	   message_send "Период проверки статуса батареи установлен на $(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек."
+	   message_send "Период проверки статуса батареи установлен на *$(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек.*"
     fi
 }
 
@@ -79,24 +84,24 @@ load_daemon() {
     if [ -f "${PLIST}" ]; then
     	# Проверяем, не запущен ли демон уже
     	if test_service ; then
-        	message_send "battscope уже запущен."
+        	message_send "${red}*BattScope* уже запущен.${red}"
         	return 1
     	else
         	# Запускаем демона в фоновом режиме
         	if sudo launchctl enable ${SERVICE} ; then
-                     message_send "battscope успешно загружен."
+                     message_send "*BattScope* успешно загружен."
                      return 0
         	else
-		     message_send "При загрузке battscope произошла ошибка"
+		     message_send "${red}При загрузке *BattScope* произошла ошибка.${red}"
 		fi
 	fi
     else
 	sudo cp ${APP_PATH}/${PLIST_NAME}.plist ${PLIST}
 	if sudo launchctl enable ${SERVICE} ; then
-	    message_send "battscope успешно загружен."
+	    message_send "*BattScope* успешно загружен."
             return 0
 	else
-	    message_send "При загрузке battscope произошла ошибка"
+	    message_send "${red}При загрузке *BattScope* произошла ошибка.${red}"
 	fi
     fi
 }
@@ -105,10 +110,10 @@ load_daemon() {
 unload_daemon() {
     # Проверяем, не запущен ли демон уже
     if test_service ; then
-	sudo launchctl disable ${SERVICE} && sudo rm -f ${PLIST} && echo "battscope успешно выгружен."
+	sudo launchctl disable ${SERVICE} && sudo rm -f ${PLIST} && message_send "*BattScope* успешно выгружен."
         return 0
     else
-        message_send "battscope НЕ загружен в автозагрузку."
+        message_send "*BattScope*${red}НЕ установлен в автозагрузку.${red}"
         return 1
     fi
 }
@@ -117,13 +122,13 @@ unload_daemon() {
 start_daemon() {
     # Проверяем, не загружен ли демон уже
     if test_service; then
-        message_send "battscope уже в памяти."
+        message_send "*BattScope*${red}уже в памяти.${red}"
         return 1
     else
 	# Запускаем демона в фоновом режиме
     	if [ -f "${PLIST}" ]; then
             sudo launchctl start ${PLIST} && {
-                message_send "battscope успешно запущен."
+                message_send "*BattScope* успешно запущен."
                 return 0
             }
 	 
@@ -137,11 +142,11 @@ start_daemon() {
 stop_daemon() {
     # Проверяем, не остановлен ли демон уже
     if test_service; then
-	sudo launchctl stop ${PLIST} && message_send "battscope остановлен."
+	sudo launchctl stop ${PLIST} && message_send "*BattScope*${red}остановлен${red}."
 	return 0
     else
         # Запускаем демона в фоновом режиме
-        message_send "battscope в памяти отсутствует."
+        message_send "*BattScope*${red}в памяти отсутствует${red}."
 	return 1
     fi
 }
@@ -161,18 +166,18 @@ status_daemon() {
         power_="подключена"
         stat="charging"
         bat_power=$(echo "${batt_stat}" | grep "${stat}" | cut -d")" -f2 | cut -d"%" -f1 | sed 's/^.//')
-        bat_power=" *${bat_power}%*"
+        bat_power="*${bat_power}%*"
     else 
-        power_="\`\`\` отключена\`\`\`"   
+        power_="${red}отключена${red}"   
         stat="discharging"
         bat_power=$(echo "${batt_stat}" | grep "${stat}" | cut -d")" -f2 | cut -d"%" -f1 | sed 's/^.//')
-        bat_power=" \`\`\` ${bat_power}%\`\`\`"
+        bat_power="${red}${bat_power}%${red}"
     fi
 
     mess="Заряд${bat_power}" 
         
     if echo "${batt_stat}" | grep -q "no estimate" ; then
-        remain="Хватит на:*\`\`\` нет данных\`\`\`*";
+        remain="Хватит на:${red}нет данных${red}";
     else
 	    hh=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f1)
         [ -n "${hh}" ] || [ "${hh}" = 0 ]  && hh="${hh} ч. " 
@@ -181,7 +186,7 @@ status_daemon() {
         if echo "${stat}" | grep -q "^charging" ; then
             remain="До полного разряда: *${hh}${mm} мин.*"
         else
-            remain="Хватит на*\`\`\` ${hh}${mm} мин.\`\`\`*"
+            remain="Хватит на${red}${hh}${mm} мин.${red}"
         fi
     fi
     
@@ -189,11 +194,11 @@ status_daemon() {
 ${mess}
 Зарядка *${power_}*
 ${remain}
-Минимальный порог: *\`\`\`${minBatteryLevel}%\`\`\`*
-Максимальный порог: *\`\`\`${maxBatteryLevel}%\`\`\`*
+Минимальный порог:${red}${minBatteryLevel}%${red}
+Максимальный порог:${red}${maxBatteryLevel}%${red}
 
 Сервис контроля зарядки: *${DAEMON_STATUS}*
-Период проверки статуса батареи:\`\`\` $(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек\`\`\`
+Период проверки статуса батареи:${red} $(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек${red}
 END
 )
     message_send "${message}"  

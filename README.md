@@ -21,7 +21,7 @@ echo "telegramChatId=<Ваш telegram ChatId>" >> ./telegram.conf
 ./battscope.run max 79
 ```
 
-> Пороги меняются прямо в тексте скрипта ./battscope.run и считываются через battscope.scpt.
+> Пороги меняются прямо в тексте скрипта `./battscope.run` и считываются через `battscope.scpt`.
 
 ## Справка по командам:
 ```
