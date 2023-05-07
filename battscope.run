@@ -14,12 +14,18 @@ maxBatteryLevel=81
 # Переменная для хранения статуса демона
 DAEMON_STATUS=""
 
-# Функция для отправки сообщения в Телеграм
-telegram_send_message() {
-  message="$1"
-  curl -s -X POST "https://api.telegram.org/bot${telegramToken}/sendMessage" \
-    -d "chat_id=${telegramChatId}" \
-    -d "text=${message}"
+# Функция для отправки сообщения в Телеграм и в терминал
+message_send() {
+
+    message="${1//./\.}"
+
+    curl -s -X POST "https://api.telegram.org/bot${telegramToken}/sendMessage" \
+        -d "chat_id=${telegramChatId}" \
+        -d "text=${message}" \
+        -d parse_mode=MarkdownV2 &>/dev/null
+    
+    echo "${message}" | sed 's/*//g; s/_//g; s/\\//g'
+    
 }
 
 # Устанавливаем минимальный порог страбатывания сообщений о зарядке
@@ -29,16 +35,16 @@ set_limit() {
 
     if [ -n "${value}" ]; then
         sed -i "" "s/\(${limit}=\).*/\1${value}/" "${0}" && {
-            echo "Лимит ${limit} установлен в значение ${value}"
+            message_send "Лимит ${limit} установлен в значение ${value}"
         } || {
-            echo "Ошибка при установке лимита."
+            message_send "Ошибка при установке лимита."
         }
 
     else
         if [ "${limit}" = "minBatteryLevel" ]; then 
-            echo "Минимальный порог установлен в ${minBatteryLevel}%"
+            message_send "Минимальный порог установлен в _${minBatteryLevel}%_"
         else
-            echo "Максимальный порог установлен в ${maxBatteryLevel}%"
+            message_send "Максимальный порог установлен в ${maxBatteryLevel}%"
         fi
     fi
 
@@ -52,9 +58,9 @@ set_period() {
 		sudo launchctl disable ${SERVICE} && \
 		sudo launchctl enable ${SERVICE} && \
 		echo "Период успешно установлен на ${period} сек." || \
-		echo "При установке периода возникла ошибка!"
+		message_send "При установке периода возникла ошибка!"
     else 
-	   echo "Период проверки статуса батареи установлен на $(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек."
+	   message_send "Период проверки статуса батареи установлен на $(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек."
     fi
 }
 
@@ -69,24 +75,24 @@ load_daemon() {
     if [ -f "${PLIST}" ]; then
     	# Проверяем, не запущен ли демон уже
     	if test_service ; then
-        	echo "battscope уже запущен."
+        	message_send "battscope уже запущен."
         	return 1
     	else
         	# Запускаем демона в фоновом режиме
         	if sudo launchctl enable ${SERVICE} ; then
-                     echo "battscope успешно загружен."
+                     message_send "battscope успешно загружен."
                      return 0
         	else
-		     echo "При загрузке battscope произошла ошибка"
+		     message_send "При загрузке battscope произошла ошибка"
 		fi
 	fi
     else
 	sudo cp ${APP_PATH}/${PLIST_NAME}.plist ${PLIST}
 	if sudo launchctl enable ${SERVICE} ; then
-	    echo "battscope успешно загружен."
+	    message_send "battscope успешно загружен."
             return 0
 	else
-	    echo "При загрузке battscope произошла ошибка"
+	    message_send "При загрузке battscope произошла ошибка"
 	fi
     fi
 }
@@ -98,7 +104,7 @@ unload_daemon() {
 	sudo launchctl disable ${SERVICE} && sudo rm -f ${PLIST} && echo "battscope успешно выгружен."
         return 0
     else
-        echo "battscope НЕ загружен в автозагрузку."
+        message_send "battscope НЕ загружен в автозагрузку."
         return 1
     fi
 }
@@ -107,13 +113,13 @@ unload_daemon() {
 start_daemon() {
     # Проверяем, не загружен ли демон уже
     if test_service; then
-        echo "battscope уже в памяти."
+        message_send "battscope уже в памяти."
         return 1
     else
 	# Запускаем демона в фоновом режиме
     	if [ -f "${PLIST}" ]; then
             sudo launchctl start ${PLIST} && {
-                echo "battscope успешно запущен."
+                message_send "battscope успешно запущен."
                 return 0
             }
 	 
@@ -127,11 +133,11 @@ start_daemon() {
 stop_daemon() {
     # Проверяем, не остановлен ли демон уже
     if test_service; then
-	sudo launchctl stop ${PLIST} && echo "battscope остановлен."
+	sudo launchctl stop ${PLIST} && message_send "battscope остановлен."
 	return 0
     else
         # Запускаем демона в фоновом режиме
-        echo "battscope в памяти отсутствует."
+        message_send "battscope в памяти отсутствует."
 	return 1
     fi
 }
@@ -148,44 +154,56 @@ status_daemon() {
     batt_stat=$(pmset -g batt)
 
     if echo ${batt_stat} | grep -q 'AC Power'; then 
-        power_=подключена
+        power_="подключена"
         stat="charging"
     else 
         power_="отключена"   
         stat="discharging"
     fi
 
-    mess="Заряд $(echo "${batt_stat}" | grep "${stat}" | cut -d")" -f2 | cut -d"%" -f1 | sed 's/^.//')%" 
+    mess="Заряд *$(echo "${batt_stat}" | grep "${stat}" | cut -d")" -f2 | cut -d"%" -f1 | sed 's/^.//')%*" 
         
     if echo "${batt_stat}" | grep -q "no estimate" ; then
-        remain="Хватит: нет данных";
+        remain="Хватит на: *нет данных*";
     else
 	    hh=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f1)
         mm=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f2)
     	
         if echo "${stat}" | grep -q "^charging" ; then 
-            remain="До полного разряда: ${hh} ч. ${mm} мин."
+            remain="До полного разряда: *${hh} ч. ${mm} мин.*"
         else
-            remain="Хватит на ${hh} ч. ${mm} мин."
+            remain="Хватит на *${hh} ч. ${mm} мин.*"
         fi
     fi
+    
     message=$(cat << END
-${mess}.
-Зарядка ${power_}.
+${mess}
+Зарядка *${power_}*
 ${remain}
-Пороги мин.: ${minBatteryLevel}%, макс.: ${maxBatteryLevel}%
-Сервис контроля зарядки: $DAEMON_STATUS
-Период проверки статуса батареи установлен на $(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек.
+Минимальный порог: *${minBatteryLevel}%*
+Максимальный порог: *${maxBatteryLevel}%*
+Сервис контроля зарядки: *${DAEMON_STATUS}*
+Период проверки статуса батареи: *$(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек*
 END
 )
-    echo "${message}"
-    telegram_send_message "${message}"  
-      
+    message_send "${message}"  
+
 }
 
+print_line(){
+
+    sim='-'
+    len=${1:-80}
+
+    # Создаем строку из повторяющихся символов K
+    string=$(printf "%-${len}s" | tr ' ' "${sim}")
+
+    # Выводим созданную строку
+    echo "$string"
+}
 
 # Обработка входных аргументов
-echo "----------------------------------------------------------------"
+print_line
 case "$1" in
     load|start|on)
         load_daemon
@@ -210,13 +228,13 @@ case "$1" in
 	;;
     *)
 	echo "Скрипт запускает сервис отслеживания состояния зарядки ноутбука."
-    echo "----------------------------------------------------------------"
-	echo "Использование: $0 {load|start|unload|stop|restart|status}" >&2
+    print_line
+    echo "Использование: $0 {load|start|unload|stop|restart|status}" >&2
 	echo "Использование: $0 {update|update '30'}" >&2
-	echo "----------------------------------------------------------------"
-	echo "Описание ключей:"
-	echo "----------------------------------------------------------------"
-	echo "load|start|on   - загружаем сервис в автозагрузку"
+	print_line
+    echo "Описание ключей:"
+	print_line
+    echo "load|start|on   - загружаем сервис в автозагрузку"
 	echo "unload|stop|off - выгружавем сервис из автозагрузки"
     echo "restart         - перезапускаем сервис"
     echo "status|log      - отображаем статус сервиса"
@@ -230,8 +248,7 @@ case "$1" in
        
         ;;
 esac
-
-echo "----------------------------------------------------------------"
+print_line
 
 exit 0
 
