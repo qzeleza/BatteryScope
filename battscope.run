@@ -1,5 +1,7 @@
 #!/bin/bash
 
+. ./telegram.conf 
+
 APP_PATH=/Users/samovar/Develop/BatteryScope
 PLIST_PATH=/Library/LaunchDaemons
 PLIST_NAME=com.samovar.batteryscope
@@ -11,6 +13,14 @@ maxBatteryLevel=81
 
 # Переменная для хранения статуса демона
 DAEMON_STATUS=""
+
+# Функция для отправки сообщения в Телеграм
+telegram_send_message() {
+  message="$1"
+  curl -s -X POST "https://api.telegram.org/bot${telegramToken}/sendMessage" \
+    -d "chat_id=${telegramChatId}" \
+    -d "text=${message}"
+}
 
 # Устанавливаем минимальный порог страбатывания сообщений о зарядке
 set_limit() {
@@ -159,14 +169,18 @@ status_daemon() {
             remain="Хватит на ${hh} ч. ${mm} мин."
         fi
     fi
-    
-    echo "${mess}."
-    echo "Зарядка ${power_}."
-    echo "${remain}"
-    echo "Пороги мин.: ${minBatteryLevel}%, макс.: ${maxBatteryLevel}%"
-    echo "Сервис контроля зарядки: $DAEMON_STATUS"
-    echo "Период проверки статуса батареи установлен на $(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек."
-    
+    message=$(cat << END
+${mess}.
+Зарядка ${power_}.
+${remain}
+Пороги мин.: ${minBatteryLevel}%, макс.: ${maxBatteryLevel}%
+Сервис контроля зарядки: $DAEMON_STATUS
+Период проверки статуса батареи установлен на $(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек.
+END
+)
+    echo "${message}"
+    telegram_send_message "${message}"  
+      
 }
 
 
