@@ -17,14 +17,18 @@ DAEMON_STATUS=""
 # Функция для отправки сообщения в Телеграм и в терминал
 message_send() {
 
+    # message="${1//./\.}"
     message="${1//./\.}"
-
+    # echo $message
+    # Кодирование текста URL-кодированием
+    # encode_message=$(echo "${message}" | jq -sRr @uri)
+    # encode_message="$( echo "${encode_message}" | sed 's/\./\\./g; s/(/\\\(/g; s/)/\\\)/g; s/\=/\\\=/g;')"
     curl -s -X POST "https://api.telegram.org/bot${telegramToken}/sendMessage" \
         -d "chat_id=${telegramChatId}" \
-        -d "text=${message}" \
-        -d parse_mode=MarkdownV2 &>/dev/null
+        -d "parse_mode=MarkdownV2" \
+        -d "text=${message}" &>/dev/null
     
-    echo "${message}" | sed 's/*//g; s/_//g; s/\\//g'
+    echo "${message}" | sed 's/*//g; s/_//g; s/\\//g; s/`//g'
     
 }
 
@@ -152,27 +156,32 @@ status_daemon() {
     fi
  
     batt_stat=$(pmset -g batt)
-
+    
     if echo ${batt_stat} | grep -q 'AC Power'; then 
         power_="подключена"
         stat="charging"
+        bat_power=$(echo "${batt_stat}" | grep "${stat}" | cut -d")" -f2 | cut -d"%" -f1 | sed 's/^.//')
+        bat_power=" *${bat_power}%*"
     else 
-        power_="отключена"   
+        power_="\`\`\` отключена\`\`\`"   
         stat="discharging"
+        bat_power=$(echo "${batt_stat}" | grep "${stat}" | cut -d")" -f2 | cut -d"%" -f1 | sed 's/^.//')
+        bat_power=" \`\`\` ${bat_power}%\`\`\`"
     fi
 
-    mess="Заряд *$(echo "${batt_stat}" | grep "${stat}" | cut -d")" -f2 | cut -d"%" -f1 | sed 's/^.//')%*" 
+    mess="Заряд${bat_power}" 
         
     if echo "${batt_stat}" | grep -q "no estimate" ; then
-        remain="Хватит на: *нет данных*";
+        remain="Хватит на:*\`\`\` нет данных\`\`\`*";
     else
 	    hh=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f1)
+        [ -n "${hh}" ] || [ "${hh}" = 0 ]  && hh="${hh} ч. " 
         mm=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f2)
     	
-        if echo "${stat}" | grep -q "^charging" ; then 
-            remain="До полного разряда: *${hh} ч. ${mm} мин.*"
+        if echo "${stat}" | grep -q "^charging" ; then
+            remain="До полного разряда: *${hh}${mm} мин.*"
         else
-            remain="Хватит на *${hh} ч. ${mm} мин.*"
+            remain="Хватит на*\`\`\` ${hh}${mm} мин.\`\`\`*"
         fi
     fi
     
@@ -180,10 +189,11 @@ status_daemon() {
 ${mess}
 Зарядка *${power_}*
 ${remain}
-Минимальный порог: *${minBatteryLevel}%*
-Максимальный порог: *${maxBatteryLevel}%*
+Минимальный порог: *\`\`\`${minBatteryLevel}%\`\`\`*
+Максимальный порог: *\`\`\`${maxBatteryLevel}%\`\`\`*
+
 Сервис контроля зарядки: *${DAEMON_STATUS}*
-Период проверки статуса батареи: *$(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек*
+Период проверки статуса батареи:\`\`\` $(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек\`\`\`
 END
 )
     message_send "${message}"  
