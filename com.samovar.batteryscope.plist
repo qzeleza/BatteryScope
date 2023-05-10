@@ -8,7 +8,7 @@
     <key>ProgramArguments</key>
     <array>
       <string>osascript</string>
-      <string>/Users/samovar/Develop/BatteryScope/battscope.scpt</string>
+      <string>/Users/samovar/Develop/BatteryScope/battscope.run 12e23s</string>
     </array>
     <key>StartInterval</key>
     <integer>60</integer>

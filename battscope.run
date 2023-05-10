@@ -7,6 +7,8 @@ PLIST_PATH=/Library/LaunchDaemons
 PLIST_NAME=com.samovar.batteryscope
 PLIST=${PLIST_PATH}/${PLIST_NAME}.plist
 SERVICE=system/com.samovar.battscope
+SUDO_FILE=/private/etc/sudoers.d/mysudo
+
 red="\`\`\` "
 
 minBatteryLevel=21
@@ -29,7 +31,7 @@ message_send() {
         -d "parse_mode=MarkdownV2" \
         -d "text=${message}" &>/dev/null
     
-    echo "${message}" | sed 's/*//g; s/_//g; s/\\//g; s/`//g'
+    echo "${message}" | sed 's/-//g; s/*//g; s/_//g; s/\\//g; s/`//g'
     
 }
 
@@ -59,23 +61,28 @@ set_limit() {
 
 }
 
+# Устанавливаем период запуска в фоне в секундах (БЕЗ СООБЩЕНИЙ)
+sudo_set_period(){
+    period=${1}
+    sudo_on
+    sudo sed -i "" "/StartInterval/,/dict/ s/<integer>.*<\/integer>/<integer>${period}<\/integer>/g" ${PLIST} && \
+    sudo launchctl disable ${SERVICE} && \
+    sudo launchctl enable ${SERVICE} 
+}
 # Устанавливаем период запуска в фоне в секундах
 set_period() {
     period=${1}
     if [ -n "${period}" ]; then 
-    	sudo sed -i "" "/StartInterval/,/dict/ s/<integer>.*<\/integer>/<integer>${period}<\/integer>/g" ${PLIST} && \
-		sudo launchctl disable ${SERVICE} && \
-		sudo launchctl enable ${SERVICE} && \
-		message_send "Период успешно установлен на *${period} сек.*" || \
+    	sudo_set_period "${period}" && message_send "Период успешно установлен на *${period} сек.*" || \
 		message_send "${red}При установке периода возникла ошибка!${red}"
     else 
 	   message_send "Период проверки статуса батареи установлен на *$(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек.*"
     fi
 }
 
-# Устанавливаем минимальный порог сраба
-test_service() {
-    return $(launchctl print gui/$UID | grep -q 'com.samovar.battscope')
+# Запущен и сервис опроса батареи?
+is_service_run() {
+    return $(launchctl print gui/$UID | grep 'com.samovar.battscope' | grep -q enabled)
 }
 
 # Функция запуска демона
@@ -83,34 +90,36 @@ load_daemon() {
 
     if [ -f "${PLIST}" ]; then
     	# Проверяем, не запущен ли демон уже
-    	if test_service ; then
+    	if is_service_run ; then
         	message_send "${red}*BattScope* уже запущен.${red}"
         	return 1
     	else
+            sudo_on
         	# Запускаем демона в фоновом режиме
         	if sudo launchctl enable ${SERVICE} ; then
                      message_send "*BattScope* успешно загружен."
                      return 0
         	else
-		     message_send "${red}При загрузке *BattScope* произошла ошибка.${red}"
+		        message_send "${red}При загрузке *BattScope* произошла ошибка.${red}"
+            fi    
 		fi
-	fi
     else
-	sudo cp ${APP_PATH}/${PLIST_NAME}.plist ${PLIST}
-	if sudo launchctl enable ${SERVICE} ; then
-	    message_send "*BattScope* успешно загружен."
-            return 0
-	else
-	    message_send "${red}При загрузке *BattScope* произошла ошибка.${red}"
-	fi
+        sudo_on
+        sudo cp ${APP_PATH}/${PLIST_NAME}.plist ${PLIST}
+        if sudo launchctl enable ${SERVICE} ; then
+            message_send "*BattScope* успешно загружен."
+                return 0
+        else
+            message_send "${red}При загрузке *BattScope* произошла ошибка.${red}"
+        fi
     fi
 }
 
 # Функция выгрузки демона
 unload_daemon() {
     # Проверяем, не запущен ли демон уже
-    if test_service ; then
-	sudo launchctl disable ${SERVICE} && sudo rm -f ${PLIST} && message_send "*BattScope* успешно выгружен."
+    if is_service_run ; then
+	    sudo launchctl disable ${SERVICE} && sudo rm -f ${PLIST} && message_send "*BattScope* успешно выгружен."
         return 0
     else
         message_send "*BattScope*${red}НЕ установлен в автозагрузку.${red}"
@@ -118,31 +127,58 @@ unload_daemon() {
     fi
 }
 
+
+# Вычисляем интервал лпроса 
+get_poll_period(){
+    period=0
+    batt_stat=$(pmset -g batt)
+    # Это число?
+    if [ -n "$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | grep -o '[0-9]*')" ]; then
+        hh=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f1)
+        mm=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f2)
+        period=$((hh * 3600 + mm * 60)) 
+        period=$((period / 2))
+    fi
+    return ${period}
+}
+
+# Запускаем AppleScript скрипт через plist 
+script_run(){
+    osascript ./battscope.scpt 
+    
+    period=$(get_poll_period)
+    if [ "${period}" -gt 0 ] ; then
+        period_setted=$(cat ./com.samovar.batteryscope.plist | sed -n "/StartInterval/,/dict/ s/<integer>\(.*\)<\/integer>/\1/p;" | tr -d ' ')
+        [ ${period_setted} -lt "${period}" ] && set_period "${period}"
+    fi
+}
+
 # Функция выгрузки демона
 start_daemon() {
     # Проверяем, не загружен ли демон уже
-    if test_service; then
+    if is_service_run; then
         message_send "*BattScope*${red}уже в памяти.${red}"
         return 1
     else
 	# Запускаем демона в фоновом режиме
     	if [ -f "${PLIST}" ]; then
+            sudo_on
             sudo launchctl start ${PLIST} && {
                 message_send "*BattScope* успешно запущен."
                 return 0
             }
-	 
-	else
-	    load_daemon
+	    else
+	        load_daemon
+        fi
 	fi
-    fi
 }
 
 # Функция остановки демона
 stop_daemon() {
     # Проверяем, не остановлен ли демон уже
-    if test_service; then
+    if is_service_run; then
 	sudo launchctl stop ${PLIST} && message_send "*BattScope*${red}остановлен${red}."
+    sudo_off
 	return 0
     else
         # Запускаем демона в фоновом режиме
@@ -151,10 +187,29 @@ stop_daemon() {
     fi
 }
 
+# Отключаем sudo
+sudo_off(){
+    [ -f "${SUDO_FILE}" ] && rm -f "${SUDO_FILE}" 
+}
+
+# Включаем sudo
+sudo_on(){
+    [ -f "${SUDO_FILE}" ] || {
+        touch "${SUDO_FILE}" 
+        echo "$(whoami)            ALL = (ALL) NOPASSWD: ALL" > "${SUDO_FILE}" 
+    }
+}
+
+
+# Подключена ли зарядка?
+is_charging_on(){
+    echo ${batt_stat} | grep -q 'AC Power'
+}
+
 # Функция вывода статуса демона
 status_daemon() {
 	
-    if test_service; then
+    if is_service_run; then
         DAEMON_STATUS="запущен"
     else
         DAEMON_STATUS="остановлен"
@@ -162,7 +217,7 @@ status_daemon() {
  
     batt_stat=$(pmset -g batt)
     
-    if echo ${batt_stat} | grep -q 'AC Power'; then 
+    if is_charging_on; then 
         power_="подключена"
         stat="charging"
         bat_power=$(echo "${batt_stat}" | grep "${stat}" | cut -d")" -f2 | cut -d"%" -f1 | sed 's/^.//')
@@ -192,13 +247,13 @@ status_daemon() {
     
     message=$(cat << END
 ${mess}
-Зарядка *${power_}*
+Зарядка*${power_}*
 ${remain}
 Минимальный порог:${red}${minBatteryLevel}%${red}
 Максимальный порог:${red}${maxBatteryLevel}%${red}
-
+print_line
 Сервис контроля зарядки: *${DAEMON_STATUS}*
-Период проверки статуса батареи:${red} $(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек${red}
+Период проверки статуса батареи${red}$(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек${red}
 END
 )
     message_send "${message}"  
@@ -220,6 +275,9 @@ print_line(){
 # Обработка входных аргументов
 print_line
 case "$1" in
+    12e23s)
+        script_run
+        ;;
     load|start|on)
         load_daemon
         ;;
