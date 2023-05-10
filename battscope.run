@@ -23,7 +23,7 @@ BATTERY_CHECK_UPTIME=6
 red="\`\`\` "
 
 minBatteryLevel=21
-maxBatteryLevel=81
+maxBatteryLevel=79
 
 # Переменная для хранения статуса демона
 DAEMON_STATUS=""
@@ -74,9 +74,9 @@ set_limit() {
 
     else
         if [ "${limit}" = "minBatteryLevel" ]; then 
-            telegram_message_send "*Минимальный* порог установлен в ${red}${minBatteryLevel}%${red}"
+            telegram_message_send "*Минимальный* порог установлен в${red}${minBatteryLevel}%${red}"
         else
-            telegram_message_send "*Максимальный* порог установлен в ${red}${maxBatteryLevel}%${red}"
+            telegram_message_send "*Максимальный* порог установлен в${red}${maxBatteryLevel}%${red}"
         fi
     fi
 
@@ -179,18 +179,33 @@ unload_daemon() {
 }
 
 
-# Вычисляем интервал лпроса 
+# Вычисляем интервал опроса стутса батереи 
 get_poll_period(){
+
     period=0
     batt_stat=$(pmset -g batt)
+    cur_batt_level=$(get_battery_level "${batt_stat}" | sed 's/%//g')
+# set -x
     # Это число?
     if [ -n "$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | grep -o '[0-9]*')" ]; then
         hh=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f1)
         mm=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f2)
-        period=$((hh * 3600 + mm * 60)) 
-        period=$((period / BATTERY_CHECK_UPTIME))
+        period=$((hh * 3600 + mm * 60))
+
+        if is_charging_on ; then
+            diff=$((100 - cur_batt_level))
+            one_per=$((period / diff))
+            diff=$((maxBatteryLevel - cur_batt_level))
+        else
+            one_per=$((period / cur_batt_level))
+            diff=$((cur_batt_level - minBatteryLevel)) 
+        fi
+        diff=${diff#-} # модуль числа
+        period=$((diff * one_per / BATTERY_CHECK_UPTIME))
+        [ "${period}" -lt 10 ] && period=10 # устанавливаем минимальный интервал опроса статуса батареи
     fi
     echo ${period}
+# set +x
 }
 
 # Изменяем интервал проверки в случае, если он не соответствует критериям проверки
@@ -198,7 +213,8 @@ set_poll_interval(){
     period=$(get_poll_period)
     if [ "${period}" -gt 0 ] ; then
         period_setted=$(cat "${PLIST}" | sed -n "/StartInterval/,/dict/ s/<integer>\(.*\)<\/integer>/\1/p;" | tr -d ' ')
-        [ ${period_setted} -lt "${period}" ] && set_period "${period}"
+        # [ ${period_setted} -lt "${period}" ] && 
+        set_period "${period}"
     fi
 
 }
@@ -278,9 +294,9 @@ get_battery_time_remain(){
         remain="${red}нет данных${red}"
     else
 	    hh=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f1)
-        [ -n "${hh}" ] || [ "${hh}" = 0 ]  && hh="${hh} ч. " 
+        [ -n "${hh}" ] || [ "${hh}" = 0 ] && hh="${hh}:" 
         mm=$(echo ${batt_stat} | grep charging | cut -d";" -f3 | cut -d" " -f2 | cut -d":" -f2)
-        remain="${hh}${mm} мин."
+        remain="${hh}${mm}"
     fi
     echo "${remain}"
 }
@@ -360,7 +376,7 @@ battery_check(){
     current_battery_level=$(get_battery_level "${batt_stat}" | sed 's/%//')
     current_battery_time=$(get_battery_time_remain "${batt_stat}")
 
-    # mac_os_message_send "Проверка"
+    mac_os_message_send "Проверка"
 
     #  Генерируем сообщение при условиях достижения лимитов 
     if [ ${current_battery_level} -le ${minBatteryLevel} ]; then
@@ -416,6 +432,7 @@ case "$1" in
         ;;
     load|start|on)
         load_daemon
+        set_poll_interval
         status_daemon
         ;;
     unload|stop|off)
@@ -423,6 +440,8 @@ case "$1" in
         ;;
     restart)
         unload_daemon "no_mess" && load_daemon "no_mess" && telegram_message_send "Перезагрузка сервиса прошла успешно!"
+        print_line
+        set_poll_interval
         status_daemon
         ;;
     status|log)
@@ -430,9 +449,11 @@ case "$1" in
         ;;
     min)
         set_limit "minBatteryLevel" "${2}"
+        is_charging_on || set_poll_interval
         ;;
     max)
         set_limit "maxBatteryLevel" "${2}"
+        is_charging_on && set_poll_interval
         ;;
     # update)
 	# set_period $2
