@@ -34,15 +34,16 @@ telegram_message_send() {
 # set -x
     # message="${1//./\.}"
     message="${1//./\.}"
-    tel_message=$(echo "${message}" | sed 's/-//g; s/(/\\(/g; s/)/\\)/g')
+    tel_message=$(echo "${message}" | sed 's/-//g; s/(/\\(/g; s/)/\\)/g; s/,/\,/g;')
     # echo $message
     # Кодирование текста URL-кодированием
     # encode_message=$(echo "${message}" | jq -sRr @uri)
     # encode_message="$( echo "${encode_message}" | sed 's/\./\\./g; s/(/\\\(/g; s/)/\\\)/g; s/\=/\\\=/g;')"
+    # echo "${tel_message}"
     curl -s -X POST "https://api.telegram.org/bot${telegramToken}/sendMessage" \
         -d "chat_id=${telegramChatId}" \
         -d "parse_mode=MarkdownV2" \
-        -d "text=${tel_message}" &>/dev/null
+        -d "text=${tel_message}" &> /dev/null
     
     echo "${message}" | sed 's/*//g; s/_//g; s/\\//g; s/`//g;' 
 
@@ -351,8 +352,7 @@ get_battery_health(){
     batt_health=$(((batt_cycle_health+batt_capacity_health)/2))
 
 
-    echo "${batt_capacity_health}% (${batt_max_capacity}/${batt_design_capacity})\
-    |${batt_cycle_health}% (${batt_cycle_count}/${batt_design_count})|${batt_health}%"
+    echo "${batt_capacity_health}% (${batt_max_capacity}/${batt_design_capacity})|${batt_cycle_health}% (${batt_cycle_count}/${batt_design_count})|${batt_health}%"
 }
 
 
@@ -366,25 +366,26 @@ status_daemon() {
         batt_check="${SERVICE_NAME}: *остановлен*"
     fi
     
+    bat_power=$(get_battery_level)
     if is_charging_on ; then 
         power_="подключена"
         stat="charging"
-        bat_power="*$(get_battery_level)*"
+        bat_power="*${bat_power}*"
     else 
         power_="${red}отключена${red}"   
         stat="discharging"
-        bat_power="${red}$(get_battery_level)${red}"
+        bat_power="${red}${bat_power}${red}"
     fi
 
     mess="Заряд${bat_power}" 
     batt_time=$(get_battery_time_remain)    
     if [ -z "$(echo "${bat_power}" | grep -o '[0-9]*')" ] ; then
-        remain="${red}Данные о времени зарядки отсуствуют.${red}"
+        remain="Данные о времени зарядки${red}отсуствуют${red}"
     else
         if echo "${stat}" | grep -q "^charging" ; then
             remain="До полного разряда: *${batt_time}*"
         else
-            remain="${red}Данные о времени зарядки отсуствуют.${red}"
+            remain="Заряда хватит на:${red}${batt_time}${red}"
         fi
     fi
     line=$(print_line)
@@ -405,7 +406,7 @@ status_daemon() {
 
     message=$(cat << END
 ${mess}
-Зарядка*${power_}*
+Зарядка${power_}
 ${remain}
 Минимальный порог:${red}${minBatteryLevel}%${red}
 Максимальный порог:${red}${maxBatteryLevel}%${red}
@@ -414,7 +415,7 @@ ${line}
 Состояние по циклам:${red}${batt_cycle_health}${red}
 Общее здоровье батареи:${red}${batt_health}${red}
 ${line}
-*${batt_check}
+${batt_check}
 ${line}
 ${model}: *${chip}*
 Серийный номер: *${serial}* 
@@ -452,7 +453,7 @@ battery_check(){
     current_battery_level=$(get_battery_level "${batt_stat}" | sed 's/%//')
     current_battery_time=$(get_battery_time_remain "${batt_stat}")
 
-    mac_os_message_send "Проверка после загрузки"
+    # mac_os_message_send "Проверка после загрузки"
 
     #  Генерируем сообщение при условиях достижения лимитов 
     if [ ${current_battery_level} -le ${minBatteryLevel} ]; then
