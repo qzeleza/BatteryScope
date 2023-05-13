@@ -33,7 +33,7 @@ telegram_message_send() {
 # set -x
     # message="${1//./\.}"
     message="${1//./\.}"
-    tel_message=$(echo "${message}" | sed 's/-//g;')
+    tel_message=$(echo "${message}" | sed 's/-//g; s/(/\\(/g; s/)/\\)/g')
     # echo $message
     # Кодирование текста URL-кодированием
     # encode_message=$(echo "${message}" | jq -sRr @uri)
@@ -43,7 +43,7 @@ telegram_message_send() {
         -d "parse_mode=MarkdownV2" \
         -d "text=${tel_message}" &>/dev/null
     
-    echo "${message}" | sed 's/*//g; s/_//g; s/\\//g; s/`//g' 
+    echo "${message}" | sed 's/*//g; s/_//g; s/\\//g; s/`//g;' 
 
 # set +x
   
@@ -51,7 +51,7 @@ telegram_message_send() {
 
 # Функция для отправки системного сообщения в macOS
 mac_os_message_send() {
-    message=$(echo "${1}" | sed 's/*//g; s/\\//g; s/`//g')
+    message=$(echo "${1}" | sed 's/*//g; s/`//g')
     giveUpInterval=10
     
     osascript -e "display dialog \"${message}\" with title \"ВНИМАНИЕ!\" buttons {\"OK\"} default button 1 with icon stop giving up after ${giveUpInterval}"
@@ -88,8 +88,8 @@ message_when_get_max(){
     battery_level=${1}
     battery_time=${2}
     
-    message="Уровень заряда достиг *${battery_level}%*\n"
-    message="${message}До полной зарядки осталось *${battery_time}*\n\n"
+    message="Уровень заряда достиг ${battery_level}%\n"
+    message="${message}До полной зарядки осталось ${battery_time}\n\n"
     message="${message}Отключите зарядку."
 
     echo "${message}"
@@ -102,7 +102,7 @@ message_when_get_min(){
     battery_level=${1}
     battery_time=${2}
 
-	message="Уровень заряда снизился до ${battery_level}\n"
+	message="Уровень заряда снизился до ${battery_level}%\n"
     message="${message}Заряда осталось на ${battery_time}\n\n"
     message="${message}Подключите зарядку."
 	
@@ -301,6 +301,42 @@ get_battery_time_remain(){
     echo "${remain}"
 }
 
+# Получить информацию о ноутбуке
+get_system_info(){
+    sys_info_sw=$(system_profiler SPSoftwareDataType)
+    sys_info_hw=$(system_profiler SPHardwareDataType)
+
+    os=$(echo "${sys_info_sw}" | grep macOS | cut -d':' -f2 | cut -d'(' -f1 | sed 's/^ //; s/ $//' )
+    core=$(echo "${sys_info_sw}" | grep Kernel | cut -d':' -f2| sed 's/^ //')
+
+    model=$(echo "${sys_info_hw}" | grep 'Model Identifier' | cut -d':' -f2| sed 's/^ //')
+    chip=$(echo "${sys_info_hw}" | grep 'Chip' | cut -d':' -f2| sed 's/^ //')
+    serial=$(echo "${sys_info_hw}" | grep 'Serial Number' | cut -d':' -f2| sed 's/^ //')
+
+    echo "${os}|${core}|${model}|${chip}|${serial}"
+}
+
+
+# Функция вывода данных о состоянии здоровья батареи
+get_battery_health(){
+    
+    batt_full_info=$(ioreg -l -w0)
+    batt_max_capacity=$(echo "${batt_full_info}" | grep AppleRawMaxCapacity | cut -d'=' -f2 | sed 's/^ //')
+    batt_design_capacity=$(echo "${batt_full_info}" | grep ' "DesignCapacity" = ' | cut -d'=' -f2 | sed 's/^ //')
+    batt_capacity_health=$((batt_max_capacity*100/batt_design_capacity))
+    
+    batt_cycle_count=$(echo "${batt_full_info}" | grep ' "CycleCount" =' | cut -d'=' -f2| sed 's/^ //')
+    batt_design_count=$(echo "${batt_full_info}" | grep ' "DesignCycleCount9C" =' | cut -d'=' -f2| sed 's/^ //')
+    batt_cycle_health=$((100 - batt_cycle_count*100/batt_design_count))
+
+    batt_health=$(((batt_cycle_health+batt_capacity_health)/2))
+
+
+    echo "${batt_capacity_health}% (${batt_max_capacity}/${batt_design_capacity})\
+    |${batt_cycle_health}% (${batt_cycle_count}/${batt_design_count})|${batt_health}%"
+}
+
+
 # Функция вывода статуса демона
 status_daemon() {
 	
@@ -325,7 +361,7 @@ status_daemon() {
     mess="Заряд${bat_power}" 
     batt_time=$(get_battery_time_remain)    
     if [ -z "$(echo "${bat_power}" | grep -o '[0-9]*')" ] ; then
-        remain="Хватит на${red}${batt_time}${red}"
+        remain="${red}Данные о времени зарядки отсуствуют.${red}"
     else
         if echo "${stat}" | grep -q "^charging" ; then
             remain="До полного разряда: *${batt_time}*"
@@ -334,6 +370,21 @@ status_daemon() {
         fi
     fi
     line=$(print_line)
+    batt_info=$(get_battery_health)
+    batt_capacity_health=$(echo "${batt_info}" | cut -d'|' -f1)
+    batt_cycle_health=$(echo "${batt_info}" | cut -d'|' -f2)
+    batt_health=$(echo "${batt_info}" | cut -d'|' -f3)
+
+    nbook_model=$(sysctl hw.model | cut -d' ' -f2)
+    system_info=$(get_system_info)
+    os=$(echo "${system_info}" | cut -d'|' -f1)
+    core=$(echo "${system_info}" | cut -d'|' -f2)
+    model=$(echo "${system_info}" | cut -d'|' -f3)
+    chip=$(echo "${system_info}" | cut -d'|' -f4)
+    serial=$(echo "${system_info}" | cut -d'|' -f5)
+
+
+
     message=$(cat << END
 ${mess}
 Зарядка*${power_}*
@@ -341,8 +392,16 @@ ${remain}
 Минимальный порог:${red}${minBatteryLevel}%${red}
 Максимальный порог:${red}${maxBatteryLevel}%${red}
 ${line}
+Вместимость батареи:${red}${batt_capacity_health}${red}
+Состояние по циклам:${red}${batt_cycle_health}${red}
+Общее здоровье батареи:${red}${batt_health}${red}
+${line}
 Сервис контроля зарядки: *${DAEMON_STATUS}*
 Период проверки статуса батареи${red}$(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек${red}
+${line}
+${model}: *${chip}*
+Серийный номер: *${serial}* 
+Операционная система: *${os}*, *${core}*
 END
 )
     telegram_message_send "${message}"  
@@ -354,14 +413,15 @@ when_checked(){
 
     current_level=${1}
     level=${2}
+    time_remain=${3}
 
     let "mod = ${current_level} % ${BATTERY_CHECK_LEVEL}"
     if [ "${mod}" = 0 ]; then 
         # Отправляем системное сообщение и в телеграмм
         if [ "${level}" = max ] ; then 
-            message=$(message_when_get_max)
+            message="$(message_when_get_max "${current_level}" "${time_remain}" )"
         else 
-            message=$(message_when_get_min)
+            message="$(message_when_get_min "${current_level}" "${time_remain}")"
         fi
         mac_os_message_send "${message}"
         telegram_message_send "${message}"
@@ -369,9 +429,10 @@ when_checked(){
 }
 
 
+
 # Основная функция проверки заряда батареи
 battery_check(){
-
+# set -x
     batt_stat=$(pmset -g batt)
     current_battery_level=$(get_battery_level "${batt_stat}" | sed 's/%//')
     current_battery_time=$(get_battery_time_remain "${batt_stat}")
@@ -381,21 +442,21 @@ battery_check(){
     #  Генерируем сообщение при условиях достижения лимитов 
     if [ ${current_battery_level} -le ${minBatteryLevel} ]; then
         # когда достигли минимального порога
-        if [ is_charging_on ]; then 
+        if is_charging_on; then 
             # если зарядка уже подключена
             MIN_CURRENT_LEVEL=0
         else
             # если зарядка все еще не подключена
-            when_checked "${MIN_CURRENT_LEVEL}" min
+            when_checked "${current_battery_level}" min "${current_battery_time}"
             MIN_CURRENT_LEVEL=${BATTERY_CHECK_LEVEL}
         fi
 
     else 
         if [ ${current_battery_level} -ge ${maxBatteryLevel} ]; then
             # когда достигли максимального порога
-            if [ is_charging_on ]; then 
+            if is_charging_on ; then 
                 # если зарядка все еще подключена
-                when_checked "${MAX_CURRENT_LEVEL}" max
+                when_checked "${current_battery_level}" max  "${current_battery_time}"
                 MAX_CURRENT_LEVEL=${BATTERY_CHECK_LEVEL}
                 
             else
@@ -433,6 +494,7 @@ case "$1" in
     load|start|on)
         load_daemon
         set_poll_interval
+        print_line
         status_daemon
         ;;
     unload|stop|off)
@@ -442,6 +504,7 @@ case "$1" in
         unload_daemon "no_mess" && load_daemon "no_mess" && telegram_message_send "Перезагрузка сервиса прошла успешно!"
         print_line
         set_poll_interval
+        print_line
         status_daemon
         ;;
     status|log)
@@ -455,9 +518,9 @@ case "$1" in
         set_limit "maxBatteryLevel" "${2}"
         is_charging_on && set_poll_interval
         ;;
-    # update)
-	# set_period $2
-	# ;;
+    update)
+	    set_period $2
+	    ;;
     *)
 	echo "Скрипт запускает сервис отслеживания состояния зарядки ноутбука."
     print_line
@@ -470,8 +533,8 @@ case "$1" in
 	echo "unload|stop|off - выгружавем сервис из автозагрузки"
     echo "restart         - перезапускаем сервис"
     echo "status|log      - отображаем статус сервиса"
-    # echo "update          - отображаем период опроса состояния батареи"
-    # echo "update '30'     - устанавливаем период опроса батереи в сек."
+    echo "update          - отображаем период опроса состояния батареи"
+    echo "update 30       - устанавливаем период опроса батереи в сек."
     echo "min             - отображаем минимальный порог сигнала, в %"
     echo "min 20          - устанавливаем минимальный порог сигнала, в %"
     echo "max             - отображаем максимальный порог сигнала, в %"
@@ -482,7 +545,7 @@ case "$1" in
 esac
 print_line
 
-exit 0
+# exit 0
 
 
 
