@@ -4,10 +4,10 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.samovar.macbatt</string>
+    <string>com.battery.scope</string>
     <key>ProgramArguments</key>
     <array>
-      <string>/Users/samovar/Develop/BatteryScope/battscope.run</string>
+      <string>/Users/samovar/Develop/BatteryScope/macbat.run</string>
       <string>check</string>
     </array>
     <key>RunAtLoad</key>
