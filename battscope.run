@@ -4,11 +4,12 @@
 
 APP_PATH=/Users/samovar/Develop/BatteryScope
 PLIST_PATH=/Library/LaunchDaemons
-PLIST_NAME=com.samovar.batteryscope
+PLIST_NAME=com.samovar.macbat
 PLIST=${PLIST_PATH}/${PLIST_NAME}.plist
-SERVICE=system/com.samovar.battscope
+SERVICE=gui/$UID/com.samovar.macbat
 SUDO_FILE=/private/etc/sudoers.d/mysudo
-
+SERVICE_NAME="Сервис контроля зарядки"
+    
 MIN_CURRENT_LEVEL=0
 MAX_CURRENT_LEVEL=0
 
@@ -116,7 +117,8 @@ sudo_set_period(){
     sudo_on
     sudo sed -i "" "/StartInterval/,/dict/ s/<integer>.*<\/integer>/<integer>${period}<\/integer>/g" ${PLIST} && \
     sudo launchctl disable ${SERVICE} && \
-    sudo launchctl enable ${SERVICE} 
+    sudo launchctl enable ${SERVICE} && \
+    sudo launchctl load ${PLIST} 
 }
 # Устанавливаем период запуска в фоне в секундах
 set_period() {
@@ -131,7 +133,7 @@ set_period() {
 
 # Запущен и сервис опроса батареи?
 is_service_run() {
-    return $(launchctl print gui/$UID | grep 'com.samovar.battscope' | grep -q enabled)
+    launchctl print gui/$UID | grep "${PLIST_NAME}" | grep -q enabled
 }
 
 # Функция запуска демона
@@ -140,26 +142,31 @@ load_daemon() {
     if [ -f "${PLIST}" ]; then
     	# Проверяем, не запущен ли демон уже
     	if is_service_run ; then
-        	telegram_message_send "${red}*BattScope* уже запущен.${red}"
+        	telegram_message_send "${SERVICE_NAME}${red}уже запущен.${red}"
         	return 1
     	else
             sudo_on
         	# Запускаем демона в фоновом режиме
-        	if sudo launchctl enable ${SERVICE} ; then
-                     [ -z "${1}" ] && telegram_message_send "*BattScope* успешно загружен."
+            launchctl disable ${SERVICE} &>/dev/null
+        	if sudo launchctl enable ${SERVICE} &>/dev/null && sudo launchctl load ${PLIST} &>/dev/null ; then
+                     [ -z "${1}" ] && telegram_message_send "${SERVICE_NAME} успешно загружен."
                      return 0
         	else
-		        telegram_message_send "${red}При загрузке *BattScope* произошла ошибка.${red}"
+		        telegram_message_send "${SERVICE_NAME}:${red}при загрузке произошла ошибка.${red}"
             fi    
 		fi
     else
+
         sudo_on
-        sudo cp ${APP_PATH}/${PLIST_NAME}.plist ${PLIST}
-        if sudo launchctl enable ${SERVICE} ; then
-            [ -z "${1}" ] && telegram_message_send "*BattScope* успешно загружен."
+        sudo cp "${APP_PATH}/${PLIST_NAME}.plist" "${PLIST}"
+        sudo chmod 644 ${PLIST} && sudo chown root:wheel "${PLIST}"
+
+        launchctl disable ${SERVICE} &>/dev/null
+        if sudo launchctl enable ${SERVICE} && sudo launchctl load ${PLIST} ; then
+            [ -z "${1}" ] && telegram_message_send "${SERVICE_NAME} успешно загружен."
                 return 0
         else
-            telegram_message_send "${red}При загрузке *BattScope* произошла ошибка.${red}"
+            telegram_message_send "${SERVICE_NAME}:${red}при загрузке произошла ошибка.${red}"
         fi
     fi
 }
@@ -168,12 +175,12 @@ load_daemon() {
 unload_daemon() {
     # Проверяем, не запущен ли демон уже
     if is_service_run ; then
-	    sudo launchctl disable ${SERVICE} && sudo rm -f ${PLIST} && {
-            [ -z "${1}" ] && telegram_message_send "*BattScope* успешно выгружен."
+	    sudo launchctl unload ${PLIST} &>/dev/null && sudo launchctl disable ${SERVICE} &>/dev/null && sudo rm -f ${PLIST} && {
+            [ -z "${1}" ] && telegram_message_send "${SERVICE_NAME} успешно выгружен."
         }
         return 0
     else
-        telegram_message_send "*BattScope*${red}НЕ установлен в автозагрузку.${red}"
+        telegram_message_send "${SERVICE_NAME}${red}НЕ установлен в автозагрузку.${red}"
         return 1
     fi
 }
@@ -224,14 +231,15 @@ set_poll_interval(){
 start_daemon() {
     # Проверяем, не загружен ли демон уже
     if is_service_run; then
-        telegram_message_send "*BattScope*${red}уже в памяти.${red}"
+        telegram_message_send "${SERVICE_NAME}${red}уже в памяти.${red}"
         return 1
     else
 	# Запускаем демона в фоновом режиме
     	if [ -f "${PLIST}" ]; then
             sudo_on
-            sudo launchctl start ${PLIST} && {
-                telegram_message_send "*BattScope* успешно запущен."
+            sudo launchctl stop ${PLIST_NAME} &>/dev/null
+            sudo launchctl start ${PLIST_NAME} &>/dev/null && {
+                telegram_message_send "${SERVICE_NAME} успешно запущен."
                 return 0
             }
 	    else
@@ -244,26 +252,32 @@ start_daemon() {
 stop_daemon() {
     # Проверяем, не остановлен ли демон уже
     if is_service_run; then
-	sudo launchctl stop ${PLIST} && telegram_message_send "*BattScope*${red}остановлен${red}."
-    sudo_off
-	return 0
+        if sudo launchctl stop ${PLIST_NAME} ;then 
+            telegram_message_send "${SERVICE_NAME}${red}остановлен.${red}"
+            sudo_off
+            return 0
+        else 
+            # Запускаем демона в фоновом режиме
+            telegram_message_send "${SERVICE_NAME}${red} не может быть остановлен.${red}"
+	        return 1
+        fi
     else
         # Запускаем демона в фоновом режиме
-        telegram_message_send "*BattScope*${red}в памяти отсутствует${red}."
-	return 1
+        telegram_message_send "${SERVICE_NAME}${red}в памяти отсутствует.${red}"
+	    return 1
     fi
 }
 
 # Отключаем sudo
 sudo_off(){
-    [ -f "${SUDO_FILE}" ] && rm -f "${SUDO_FILE}" 
+    [ -f "${SUDO_FILE}" ] && sudo rm -f "${SUDO_FILE}" 
 }
 
 # Включаем sudo
 sudo_on(){
     [ -f "${SUDO_FILE}" ] || {
-        touch "${SUDO_FILE}" 
-        echo "$(whoami)            ALL = (ALL) NOPASSWD: ALL" > "${SUDO_FILE}" 
+        sudo touch "${SUDO_FILE}" 
+        sudo echo "$(whoami)            ALL = (ALL) NOPASSWD: ALL" > "${SUDO_FILE}" 
     }
 }
 
@@ -341,9 +355,10 @@ get_battery_health(){
 status_daemon() {
 	
     if is_service_run; then
-        DAEMON_STATUS="запущен"
+        batt_check="Период проверки статуса батареи${red}$(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек${red}"
+
     else
-        DAEMON_STATUS="остановлен"
+        batt_check="${SERVICE_NAME}: *остановлен*"
     fi
  
     # batt_stat=$(pmset -g batt)
@@ -378,7 +393,7 @@ status_daemon() {
     nbook_model=$(sysctl hw.model | cut -d' ' -f2)
     system_info=$(get_system_info)
     os=$(echo "${system_info}" | cut -d'|' -f1)
-    core=$(echo "${system_info}" | cut -d'|' -f2)
+    # core=$(echo "${system_info}" | cut -d'|' -f2)
     model=$(echo "${system_info}" | cut -d'|' -f3)
     chip=$(echo "${system_info}" | cut -d'|' -f4)
     serial=$(echo "${system_info}" | cut -d'|' -f5)
@@ -396,12 +411,11 @@ ${line}
 Состояние по циклам:${red}${batt_cycle_health}${red}
 Общее здоровье батареи:${red}${batt_health}${red}
 ${line}
-Сервис контроля зарядки: *${DAEMON_STATUS}*
-Период проверки статуса батареи${red}$(cat ${PLIST} | grep '<integer>' | cut -d'>' -f2 | cut -d'<' -f1) сек${red}
+*${batt_check}
 ${line}
 ${model}: *${chip}*
 Серийный номер: *${serial}* 
-Операционная система: *${os}*, *${core}*
+Операционная система: *${os}*
 END
 )
     telegram_message_send "${message}"  
@@ -491,20 +505,25 @@ case "$1" in
     check)
         battery_check
         ;;
-    load|start|on)
+    load|on)
         load_daemon
-        set_poll_interval
         print_line
+        set_poll_interval &>/dev/null
         status_daemon
         ;;
-    unload|stop|off)
+    start)
+        start_daemon
+        ;;
+    stop)
+        stop_daemon
+        ;;
+    unload|off)
         unload_daemon
         ;;
     restart)
         unload_daemon "no_mess" && load_daemon "no_mess" && telegram_message_send "Перезагрузка сервиса прошла успешно!"
         print_line
-        set_poll_interval
-        print_line
+        set_poll_interval  &>/dev/null
         status_daemon
         ;;
     status|log)
